@@ -125,7 +125,7 @@
   const SCROLL_PICKUP_KEY = "KeyP";
   const SCROLL_TITLE = "Dear Arcelie,";
   const SCROLL_MESSAGE =
-    "Happy 2nd monthsary, babi. Honestly, I’m running out of words to show \nhow much I care for you, how much I love you, and how important you are  \nto me. Thank you for everything. I love how you take care of me and all the  \nthings you do for me. \n \nI made this mini game as a small effort to make this day a little special.  \nJust remember that I’m always here for you. I will always be on your side and be your \nshoulder whenever you need me. To more gala, kain, at tambay with you. I love you! \n \nLove, \nJai";
+    "Happy 2nd monthsary, babi. Honestly, I’m running out of words to show \nhow much I care for you, how much I love you, and how important you are  \nto me. Thank you for everything. I love how you take care of me and all the  \nthings you do for me. \n \nI made this mini game as a small effort to make this day a little special.  \nJust remember that I’m always here for you. I will always be on your side and be your \n crying shoulder whenever you need. To more gala, kain, at tambay with you. I love you! \n \nLove, \nJai";
 
   // Player visual size (sprite draw height)
   const PLAYER_DRAW_HEIGHT = 60;
@@ -943,5 +943,6 @@
   resize();
   requestAnimationFrame(tick);
 })();
+
 
 
