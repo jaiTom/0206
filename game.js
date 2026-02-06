@@ -4,6 +4,11 @@
   - resources/BF.png  (companion that spawns after 9 loot)
   - resources/background.png (optional)
 
+  Pets:
+  - resources/mamba_idle.png, resources/mamba_walk.png     (GF pet)
+  - resources/mochi_idle.png, resources/mochi_walk.png     (BF pet #1)
+  - resources/pochaco_idle.png, resources/pochaco_walk.png (BF pet #2)
+
   Controls:
   A/Left = move left
   D/Right = move right
@@ -32,63 +37,10 @@
   // ===== DISPLAY =====
   let dpr = 1;
   let W = 0, H = 0;
-
-  function resize() {
-    dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
-    W = window.innerWidth;
-    H = window.innerHeight;
-    canvas.width = Math.floor(W * dpr);
-    canvas.height = Math.floor(H * dpr);
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-    // Reset the world on resize
-    resetWorld();
-  }
-  window.addEventListener("resize", resize);
+  let prevW = 0, prevH = 0;
 
   // ===== INPUT =====
   const keys = new Set();
-
-  window.addEventListener(
-    "keydown",
-    (e) => {
-      if (["ArrowLeft", "ArrowRight", "Space"].includes(e.code)) e.preventDefault();
-
-      // ✅ Press Space to start
-      if (!gameStarted && e.code === "Space") {
-        gameStarted = true;
-        if (overlayEl) overlayEl.classList.add("hidden");
-        keys.add(e.code);
-        return;
-      }
-
-      // Block gameplay input until started
-      if (!gameStarted) return;
-
-      // Close scroll panel with X
-      if (scrollPanelOpen && (e.key === "x" || e.key === "X")) {
-        scrollPanelOpen = false;
-        return;
-      }
-
-      // Pick up scroll with P (only if overlapping)
-      if (e.code === SCROLL_PICKUP_KEY && scrollItem && !scrollItem.picked && !scrollPanelOpen) {
-        if (aabbOverlap(player, scrollItem)) {
-          scrollItem.picked = true;
-          scrollPanelOpen = true;
-          return;
-        }
-      }
-
-      keys.add(e.code);
-    },
-    { passive: false }
-  );
-  window.addEventListener("keyup", (e) => keys.delete(e.code));
-
-  const leftHeld = () => keys.has("KeyA") || keys.has("ArrowLeft");
-  const rightHeld = () => keys.has("KeyD") || keys.has("ArrowRight");
-  const jumpHeld = () => keys.has("Space");
 
   // ===== TWEAKS =====
   const GRAVITY = 2200;
@@ -123,9 +75,25 @@
   // ===== SCROLL EVENT SETTINGS =====
   const SCROLL_CLOSE_TIME = 10; // seconds GF+BF must stay close
   const SCROLL_PICKUP_KEY = "KeyP";
-  const SCROLL_TITLE = "Dear Arcelie,";
+  const SCROLL_TITLE = "Dear, babi";
   const SCROLL_MESSAGE =
-    "Happy 2nd monthsary, babi. Honestly, I’m running out of words to show \nhow much I care for you, how much I love you, and how important you are  \nto me. Thank you for everything. I love how you take care of me and all the  \nthings you do for me. \n \nI made this mini game as a small effort to make this day a little special.  \nJust remember that I’m always here for you. I will always be on your side and be your \n crying shoulder whenever you need. To more gala, kain, at tambay with you. I love you! \n \nLove, \nJai";
+    "Happy 2nd monthsary, babi. Honestly, I’m running out of words to show \n" +
+    "how much I care for you, how much I love you, and how important you are  \n" +
+    "to me. Thank you for everything. I love how you take care of me and all the  \n" +
+    "things you do for me. \n \n" +
+    "I made this mini game as a small effort to make this day a little special.  \n" +
+    "Just remember that I’m always here for you. I will always be on your side and be your \n" +
+    "shoulder whenever you need me. To more gala, kain, at tambay with you. I love you! \n \n" +
+    "Love, \nJai";
+
+  // ===== PET SETTINGS =====
+  const PET_W = 34;
+  const PET_H = 28;
+  const PET_SPEED = 280;
+  const PET_JUMP = 860;
+  const PET_FOLLOW_DIST = 60;          // how close pets try to stay
+  const PET_LOOT_SEEK_DIST = 340;      // if loot within this range, pet targets it
+  const PET_LOOT_PRIORITY_DIST = 520;  // overall radius around owner to consider loot
 
   // Player visual size (sprite draw height)
   const PLAYER_DRAW_HEIGHT = 60;
@@ -188,14 +156,13 @@
     }
   }
 
-  // ===== Background Image =====
+  // ===== Images =====
   const bgImg = new Image();
   let bgReady = false;
   bgImg.onload = () => (bgReady = true);
   bgImg.onerror = () => (bgReady = false);
   bgImg.src = "resources/background.png";
 
-  // ===== Sprites =====
   const gfImg = new Image();
   let gfReady = false;
   gfImg.onload = () => (gfReady = true);
@@ -208,21 +175,37 @@
   bfImg.onerror = () => (bfReady = false);
   bfImg.src = "resources/BF.png";
 
+  // Pets (idle/walk)
+  function loadImg(src) {
+    const im = new Image();
+    let ok = false;
+    im.onload = () => (ok = true);
+    im.onerror = () => (ok = false);
+    im.src = src;
+    return { im, get ok() { return ok; } };
+  }
+
+  const mambaIdle = loadImg("resources/mamba_idle.png");
+  const mambaWalk = loadImg("resources/mamba_walk.png");
+
+  const mochiIdle = loadImg("resources/mochi_idle.png");
+  const mochiWalk = loadImg("resources/mochi_walk.png");
+
+  const pochacoIdle = loadImg("resources/pochaco_idle.png");
+  const pochacoWalk = loadImg("resources/pochaco_walk.png");
+
   // ===== HUD =====
   const scoreEl = document.getElementById("score");
   const lootEl = document.getElementById("loot");
   const boxesEl = document.getElementById("boxes");
 
-  // ===== STATE =====
+  // ===== WORLD STATE =====
   const state = { score: 0, loot: 0 };
 
   const player = {
-    x: 120,
-    y: 0,
-    w: PLAYER_HIT_W,
-    h: PLAYER_HIT_H,
-    vx: 0,
-    vy: 0,
+    x: 120, y: 0,
+    w: PLAYER_HIT_W, h: PLAYER_HIT_H,
+    vx: 0, vy: 0,
     onGround: false,
     facing: 1,
     jumpLock: false,
@@ -231,8 +214,16 @@
   const solids = [];
   const boxes = [];
   const lootItems = [];
+
+  let ground = null;
+
   let companion = null;
   let companionStuckT = 0;
+
+  // Pets:
+  let petGF = null;             // Mamba follows GF
+  let petBF1 = null;            // Mochi follows BF
+  let petBF2 = null;            // Pochaco follows BF
 
   // dialogue state
   let companionCloseT = 0;
@@ -244,6 +235,201 @@
   let scrollItem = null;       // {x,y,w,h,vx,vy,onGround,picked}
   let scrollPanelOpen = false;
   let pPromptT = 0;
+
+  // ===== SOFT SEPARATION (NO BLOCKING): entities can pass through, but won't sit overlapped =====
+  const ENTITY_GAP = 2;       // visible spacing
+  const SEP_PASSES = 2;       // 1-3 usually enough
+  const SEP_STRENGTH = 1.0;   // 0.5 softer, 1.0 strong
+
+  function getDynamicEntities() {
+    const arr = [player];
+    if (companion) arr.push(companion);
+    if (petGF) arr.push(petGF);
+    if (companion && petBF1) arr.push(petBF1);
+    if (companion && petBF2) arr.push(petBF2);
+    return arr;
+  }
+
+  function softSeparateAllEntities() {
+  const ents = getDynamicEntities();
+  if (ents.length <= 1) return;
+
+  const MAX_NUDGE = 10; // caps how much they get pushed per pass
+
+  for (let pass = 0; pass < SEP_PASSES; pass++) {
+    for (let i = 0; i < ents.length; i++) {
+      for (let j = i + 1; j < ents.length; j++) {
+        let a = ents[i], b = ents[j];
+        if (!aabbOverlap(a, b)) continue;
+
+        // overlap amounts
+        const ox = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+        const oy = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+
+        // Prefer X separation so they look "beside"
+        const preferX = ox <= oy * 1.35;
+
+        // If player is involved, NEVER move player.
+        const aIsPlayer = (a === player);
+        const bIsPlayer = (b === player);
+
+        // Choose who gets moved:
+        // - If player overlaps someone, move ONLY the other one.
+        // - Else split push normally.
+        let moveA = !aIsPlayer;
+        let moveB = !bIsPlayer;
+
+        // If neither is player, we move both
+        if (!aIsPlayer && !bIsPlayer) {
+          moveA = true;
+          moveB = true;
+        }
+
+        if (preferX) {
+          const aC = a.x + a.w / 2;
+          const bC = b.x + b.w / 2;
+          const dir = (aC <= bC) ? -1 : 1;
+
+          let push = (ox + ENTITY_GAP) * SEP_STRENGTH;
+          push = Math.min(push, MAX_NUDGE);
+
+          if (moveA && moveB) {
+            a.x += dir * push * 0.5;
+            b.x -= dir * push * 0.5;
+          } else if (moveA) {
+            a.x += dir * push;
+          } else if (moveB) {
+            b.x -= dir * push;
+          }
+        } else {
+          const aC = a.y + a.h / 2;
+          const bC = b.y + b.h / 2;
+          const dir = (aC <= bC) ? -1 : 1;
+
+          let push = (oy + ENTITY_GAP) * 0.6 * SEP_STRENGTH;
+          push = Math.min(push, MAX_NUDGE);
+
+          if (moveA && moveB) {
+            a.y += dir * push * 0.5;
+            b.y -= dir * push * 0.5;
+          } else if (moveA) {
+            a.y += dir * push;
+          } else if (moveB) {
+            b.y -= dir * push;
+          }
+        }
+
+        // Clamp to screen
+        a.x = clamp(a.x, 10, W - a.w - 10);
+        b.x = clamp(b.x, 10, W - b.w - 10);
+        a.y = clamp(a.y, 0, H - a.h - 20);
+        b.y = clamp(b.y, 0, H - b.h - 20);
+      }
+    }
+  }
+}
+
+
+  // ===== RESIZE (NO RESET) + WORLD SHIFT =====
+  function resize() {
+    const oldW = prevW || window.innerWidth;
+    const oldH = prevH || window.innerHeight;
+
+    dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+    W = window.innerWidth;
+    H = window.innerHeight;
+
+    canvas.width = Math.floor(W * dpr);
+    canvas.height = Math.floor(H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    // Shift existing world vertically so it doesn't "jump" on resize
+    const dy = H - oldH;
+
+    if (ground) {
+      // ground stays at bottom
+      ground.y = H - ground.h;
+      ground.w = 199999;
+    }
+
+    // shift other solids/platforms + boxes + entities + items by dy
+    if (solids.length) {
+      for (const s of solids) {
+        if (s === ground) continue;
+        s.y += dy;
+      }
+    }
+    if (boxes.length) for (const b of boxes) b.y += dy;
+    if (lootItems.length) for (const it of lootItems) it.y += dy;
+
+    // entities
+    if (typeof player !== "undefined") player.y += dy;
+    if (companion) companion.y += dy;
+    if (petGF) petGF.y += dy;
+    if (petBF1) petBF1.y += dy;
+    if (petBF2) petBF2.y += dy;
+    if (scrollItem && !scrollItem.picked) scrollItem.y += dy;
+
+    // clamp x/y to screen bounds safely
+    player.x = clamp(player.x, 10, Math.max(10, W - player.w - 10));
+    player.y = clamp(player.y, 0, Math.max(0, H - player.h - 20));
+
+    if (companion) {
+      companion.x = clamp(companion.x, 10, Math.max(10, W - companion.w - 10));
+      companion.y = clamp(companion.y, 0, Math.max(0, H - companion.h - 20));
+    }
+    for (const p of [petGF, petBF1, petBF2]) {
+      if (!p) continue;
+      p.x = clamp(p.x, 10, Math.max(10, W - p.w - 10));
+      p.y = clamp(p.y, 0, Math.max(0, H - p.h - 20));
+    }
+
+    prevW = W;
+    prevH = H;
+  }
+  window.addEventListener("resize", resize);
+
+  // ===== INPUT =====
+  window.addEventListener(
+    "keydown",
+    (e) => {
+      if (["ArrowLeft", "ArrowRight", "Space"].includes(e.code)) e.preventDefault();
+
+      // ✅ Press Space to start
+      if (!gameStarted && e.code === "Space") {
+        gameStarted = true;
+        if (overlayEl) overlayEl.classList.add("hidden");
+        keys.add(e.code);
+        return;
+      }
+
+      // Block gameplay input until started
+      if (!gameStarted) return;
+
+      // Close scroll panel with X
+      if (scrollPanelOpen && (e.key === "x" || e.key === "X")) {
+        scrollPanelOpen = false;
+        return;
+      }
+
+      // Pick up scroll with P (only if overlapping)
+      if (e.code === SCROLL_PICKUP_KEY && scrollItem && !scrollItem.picked && !scrollPanelOpen) {
+        if (aabbOverlap(player, scrollItem)) {
+          scrollItem.picked = true;
+          scrollPanelOpen = true;
+          return;
+        }
+      }
+
+      keys.add(e.code);
+    },
+    { passive: false }
+  );
+  window.addEventListener("keyup", (e) => keys.delete(e.code));
+
+  const leftHeld = () => keys.has("KeyA") || keys.has("ArrowLeft");
+  const rightHeld = () => keys.has("KeyD") || keys.has("ArrowRight");
+  const jumpHeld = () => keys.has("Space");
 
   // Click-to-close X on scroll panel
   canvas.addEventListener("click", (e) => {
@@ -267,9 +453,15 @@
     }
   });
 
+  function updateHUD() {
+    if (scoreEl) scoreEl.textContent = String(state.score);
+    if (lootEl) lootEl.textContent = String(state.loot);
+    if (boxesEl) boxesEl.textContent = boxes.map((b) => b.hitsLeft).join(", ");
+  }
+
   function groundRect() {
     const gh = 110;
-    return { x: -99999, y: H - gh, w: 199999, h: gh };
+    return { tag: "ground", x: -99999, y: H - gh, w: 199999, h: gh };
   }
 
   function resetWorld() {
@@ -277,26 +469,26 @@
     boxes.length = 0;
     lootItems.length = 0;
 
-    const g = groundRect();
-    solids.push(g);
+    ground = groundRect();
+    solids.push(ground);
 
     // Platforms
-    solids.push({ x: 140,  y: g.y - 270, w: 140, h: 26 });
-    solids.push({ x: 340,  y: g.y - 130, w: 140, h: 26 });
-    solids.push({ x: 580,  y: g.y - 240, w: 180, h: 26 });
-    solids.push({ x: 880,  y: g.y - 360, w: 140, h: 26 });
-    solids.push({ x: 1100, y: g.y - 120, w: 140, h: 26 });
+    solids.push({ x: 140,  y: ground.y - 270, w: 140, h: 26 });
+    solids.push({ x: 340,  y: ground.y - 130, w: 140, h: 26 });
+    solids.push({ x: 580,  y: ground.y - 240, w: 180, h: 26 });
+    solids.push({ x: 880,  y: ground.y - 360, w: 140, h: 26 });
+    solids.push({ x: 1100, y: ground.y - 120, w: 140, h: 26 });
 
     // Mystery boxes (exactly 3)
-    boxes.push({ id: 0, x: 185,  y: g.y - 420, w: 52, h: 52, hitsLeft: BOX_HITS_REQUIRED, bounceT: 0 });
-    boxes.push({ id: 1, x: 920,  y: g.y - 540, w: 52, h: 52, hitsLeft: BOX_HITS_REQUIRED, bounceT: 0 });
-    boxes.push({ id: 2, x: 1140, y: g.y - 310, w: 52, h: 52, hitsLeft: BOX_HITS_REQUIRED, bounceT: 0 });
+    boxes.push({ id: 0, x: 185,  y: ground.y - 420, w: 52, h: 52, hitsLeft: BOX_HITS_REQUIRED, bounceT: 0 });
+    boxes.push({ id: 1, x: 920,  y: ground.y - 540, w: 52, h: 52, hitsLeft: BOX_HITS_REQUIRED, bounceT: 0 });
+    boxes.push({ id: 2, x: 1140, y: ground.y - 310, w: 52, h: 52, hitsLeft: BOX_HITS_REQUIRED, bounceT: 0 });
 
     // Reset player
     player.w = PLAYER_HIT_W;
     player.h = PLAYER_HIT_H;
     player.x = 120;
-    player.y = g.y - player.h;
+    player.y = ground.y - player.h;
     player.vx = 0;
     player.vy = 0;
     player.onGround = true;
@@ -315,15 +507,14 @@
     scrollPanelOpen = false;
     pPromptT = 0;
 
+    // Reset pets
+    petGF = spawnPetNear(player, "GF");
+    petBF1 = null;
+    petBF2 = null;
+
     state.score = 0;
     state.loot = 0;
     updateHUD();
-  }
-
-  function updateHUD() {
-    if (scoreEl) scoreEl.textContent = String(state.score);
-    if (lootEl) lootEl.textContent = String(state.loot);
-    if (boxesEl) boxesEl.textContent = boxes.map((b) => b.hitsLeft).join(", ");
   }
 
   function spawnLootFromBox(box) {
@@ -351,6 +542,7 @@
       onGround: false,
       facing: 1,
     };
+
     companionStuckT = 0;
     companionCloseT = 0;
     dialogueT = 0;
@@ -360,6 +552,10 @@
     scrollCloseT = 0;
     scrollItem = null;
     scrollPanelOpen = false;
+
+    // spawn BF pets
+    petBF1 = spawnPetNear(companion, "BF1");
+    petBF2 = spawnPetNear(companion, "BF2");
   }
 
   function closeEnoughGF_BF() {
@@ -385,6 +581,147 @@
     };
   }
 
+  // ===== PET LOGIC =====
+  function spawnPetNear(owner, kind) {
+    return {
+      kind,
+      x: clamp(owner.x - 42, 10, W - PET_W - 10),
+      y: owner.y - 2,
+      w: PET_W,
+      h: PET_H,
+      vx: 0,
+      vy: 0,
+      onGround: false,
+      facing: 1,
+      anim: "idle", // "idle" | "walk"
+      lootTargetId: null,
+    };
+  }
+
+  function findNearestLootTarget(pet, owner) {
+    // prefer collectable loot that is not collected
+    // AND within radius of owner so pet doesn't run far away
+    let best = null;
+    let bestD = Infinity;
+
+    const ox = owner.x + owner.w / 2;
+    const oy = owner.y + owner.h / 2;
+
+    for (let i = 0; i < lootItems.length; i++) {
+      const it = lootItems[i];
+      if (it.collected || !it.collectable) continue;
+
+      const ix = it.x + it.w / 2;
+      const iy = it.y + it.h / 2;
+
+      const dOwner = Math.hypot(ix - ox, iy - oy);
+      if (dOwner > PET_LOOT_PRIORITY_DIST) continue;
+
+      const px = pet.x + pet.w / 2;
+      const py = pet.y + pet.h / 2;
+      const dPet = Math.hypot(ix - px, iy - py);
+
+      if (dPet < bestD) {
+        bestD = dPet;
+        best = it;
+      }
+    }
+
+    // only seek loot if reasonably close
+    if (best && bestD <= PET_LOOT_SEEK_DIST) return best;
+    return null;
+  }
+
+  function stepPet(dt, pet, owner) {
+    if (!pet || !owner) return;
+
+    const prevP = { x: pet.x, y: pet.y };
+    pet.onGround = false;
+
+    // gravity
+    pet.vy += GRAVITY * dt;
+
+    // choose target: loot or follow owner
+    const lootTarget = findNearestLootTarget(pet, owner);
+
+    let targetX = owner.x;
+    let targetY = owner.y;
+
+    if (lootTarget) {
+      targetX = lootTarget.x;
+      targetY = lootTarget.y;
+    } else {
+      // stay slightly behind owner
+      targetX = owner.x - owner.facing * 24;
+      targetY = owner.y;
+    }
+
+    const dx = (targetX + 0) - pet.x;
+    const adx = Math.abs(dx);
+
+    if (adx > PET_FOLLOW_DIST) {
+      pet.vx = Math.sign(dx) * PET_SPEED;
+      pet.facing = Math.sign(dx) || pet.facing || 1;
+      pet.anim = "walk";
+    } else {
+      pet.vx *= 0.7;
+      if (Math.abs(pet.vx) < 8) pet.vx = 0;
+      pet.anim = "idle";
+    }
+
+    // move
+    pet.x += pet.vx * dt;
+    pet.y += pet.vy * dt;
+    pet.x = clamp(pet.x, 10, W - pet.w - 10);
+
+    // collide
+    for (const s of solids) resolveAABB(pet, s, prevP);
+
+    // jump if owner is above / or loot is above
+    const petFeet = pet.y + pet.h;
+    const ownerFeet = owner.y + owner.h;
+    const heightDiff = petFeet - ownerFeet; // positive => owner is higher
+    const horizontalDist = Math.abs((owner.x + owner.w / 2) - (pet.x + pet.w / 2));
+
+    if (pet.onGround && heightDiff > 18 && horizontalDist < 320) {
+      pet.vy = -PET_JUMP;
+      pet.onGround = false;
+    }
+
+    if (lootTarget) {
+      const lootFeet = lootTarget.y + lootTarget.h;
+      const lootDiff = petFeet - lootFeet;
+      const lootHDist = Math.abs((lootTarget.x + lootTarget.w / 2) - (pet.x + pet.w / 2));
+      if (pet.onGround && lootDiff > 18 && lootHDist < 260) {
+        pet.vy = -PET_JUMP * 1.05;
+        pet.onGround = false;
+      }
+    }
+  }
+
+  function petCollectLoot(pet) {
+    if (!pet) return false;
+    let collectedAny = false;
+
+    for (const it of lootItems) {
+      if (it.collected) continue;
+      if (!it.collectable) continue;
+
+      if (aabbOverlap(pet, it)) {
+        it.collected = true;
+        state.loot += 1;
+        state.score += 25;
+        collectedAny = true;
+
+        // spawn BF at 9 loot (even if pet collected it)
+        if (state.loot >= COMPANION_TRIGGER_LOOT && !companion) {
+          spawnCompanion();
+        }
+      }
+    }
+    return collectedAny;
+  }
+
   // ===== LOOP =====
   let last = performance.now();
   function tick(now) {
@@ -404,10 +741,10 @@
   }
 
   function step(dt) {
+    // ===== PLAYER =====
     const prev = { x: player.x, y: player.y };
     player.onGround = false;
 
-    // Player movement
     if (leftHeld()) {
       player.vx -= MOVE_ACC * dt;
       player.facing = -1;
@@ -438,7 +775,7 @@
       }
     }
 
-    // Boxes
+    // ===== BOXES =====
     for (const box of boxes) {
       const side = resolveAABB(player, box, prev);
       if (side === "bottom" && prev.y > player.y && player.vy <= 0) {
@@ -452,7 +789,7 @@
       box.bounceT = Math.max(0, box.bounceT - dt);
     }
 
-    // Loot
+    // ===== LOOT PHYSICS + COLLECT (PLAYER) =====
     for (const it of lootItems) {
       if (it.collected) continue;
 
@@ -488,7 +825,23 @@
       }
     }
 
-    // cleanup
+    // ===== PETS: FOLLOW + AUTO COLLECT LOOT =====
+    // GF pet always exists
+    if (!petGF) petGF = spawnPetNear(player, "GF");
+    stepPet(dt, petGF, player);
+    petCollectLoot(petGF);
+
+    // BF pets only after BF exists
+    if (companion) {
+      if (!petBF1) petBF1 = spawnPetNear(companion, "BF1");
+      if (!petBF2) petBF2 = spawnPetNear(companion, "BF2");
+      stepPet(dt, petBF1, companion);
+      stepPet(dt, petBF2, companion);
+      petCollectLoot(petBF1);
+      petCollectLoot(petBF2);
+    }
+
+    // ===== CLEANUP LOOT =====
     for (let i = lootItems.length - 1; i >= 0; i--) {
       if (lootItems[i].collected) lootItems.splice(i, 1);
     }
@@ -497,10 +850,8 @@
     if (companion) {
       const prevC = { x: companion.x, y: companion.y };
 
-      // gravity
       companion.vy += GRAVITY * dt;
 
-      // follow horizontally
       const dx = player.x - companion.x;
       if (Math.abs(dx) > 50) {
         companion.vx = Math.sign(dx) * COMPANION_SPEED;
@@ -509,18 +860,13 @@
         companion.vx = 0;
       }
 
-      // move
       companion.x += companion.vx * dt;
       companion.y += companion.vy * dt;
       companion.x = clamp(companion.x, 10, W - companion.w - 10);
 
-      // collide (sets onGround)
       companion.onGround = false;
-      for (const s of solids) {
-        resolveAABB(companion, s, prevC);
-      }
+      for (const s of solids) resolveAABB(companion, s, prevC);
 
-      // climb logic AFTER collision
       const playerCenterX = player.x + player.w / 2;
       const companionCenterX = companion.x + companion.w / 2;
       const horizontalDist = Math.abs(playerCenterX - companionCenterX);
@@ -538,7 +884,6 @@
         companion.onGround = false;
       }
 
-      // rescue if far + much higher for a while
       const distToPlayer = Math.abs(playerCenterX - companionCenterX);
       if (heightDiff > 180 && distToPlayer > COMPANION_RESCUE_DIST) {
         companionStuckT += dt;
@@ -607,9 +952,11 @@
       for (const s of solids) resolveAABB(scrollItem, s, prevS);
     }
 
-    // pulse timer for "Press P"
-    pPromptT += dt;
+    // ===== SOFT SEPARATION CALL (NO BLOCKING) =====
+    // Entities can pass through, but won't remain overlapped visually.
+    softSeparateAllEntities();
 
+    pPromptT += dt;
     updateHUD();
   }
 
@@ -625,7 +972,7 @@
       ctx.fillRect(0, 0, W, H);
     }
 
-    // subtle scan lines
+    // scan lines
     ctx.fillStyle = "rgba(255,255,255,0.04)";
     for (let i = 0; i < 18; i++) ctx.fillRect(0, i * (H / 18), W, 1);
 
@@ -642,6 +989,12 @@
       drawPickupPrompt("Press P to pick up");
     }
 
+    // Pets (behind characters)
+    if (petGF) drawPet(petGF, mambaIdle, mambaWalk);
+    if (companion && petBF1) drawPet(petBF1, mochiIdle, mochiWalk);
+    if (companion && petBF2) drawPet(petBF2, pochacoIdle, pochacoWalk);
+
+    // Characters
     drawCharacter(player, gfImg, gfReady);
     if (companion) drawCharacter(companion, bfImg, bfReady);
 
@@ -756,6 +1109,40 @@
       ctx.strokeStyle = "rgba(0,0,0,.35)";
       ctx.lineWidth = 3;
       ctx.strokeRect(p.x + 1.5, p.y + 1.5, p.w - 3, p.h - 3);
+    }
+  }
+
+  function drawPet(p, idlePack, walkPack) {
+    // shadow
+    ctx.fillStyle = "rgba(0,0,0,.18)";
+    ctx.beginPath();
+    ctx.ellipse(p.x + p.w / 2, p.y + p.h + 5, p.w * 0.42, 4, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    const pack = (p.anim === "walk") ? walkPack : idlePack;
+    const img = pack.im;
+    const ready = pack.ok;
+
+    if (ready) {
+      const imgW = Math.max(1, img.naturalWidth || img.width || 1);
+      const imgH = Math.max(1, img.naturalHeight || img.height || 1);
+      const drawH = 36;
+      const drawW = drawH * (imgW / imgH);
+
+      const drawX = p.x + (p.w - drawW) / 2;
+      const drawY = p.y + (p.h - drawH);
+
+      ctx.save();
+      ctx.translate(drawX + drawW / 2, drawY + drawH / 2);
+      ctx.scale(p.facing || 1, 1);
+      ctx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
+      ctx.restore();
+    } else {
+      ctx.fillStyle = "#ffd36b";
+      ctx.fillRect(p.x, p.y, p.w, p.h);
+      ctx.strokeStyle = "rgba(0,0,0,.35)";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(p.x + 1, p.y + 1, p.w - 2, p.h - 2);
     }
   }
 
@@ -939,10 +1326,10 @@
     ctx.restore();
   }
 
-  // START
-  resize();
+  // ===== START =====
+  prevW = window.innerWidth;
+  prevH = window.innerHeight;
+  resize();       // sets W/H + canvas
+  resetWorld();   // only once here
   requestAnimationFrame(tick);
 })();
-
-
-
