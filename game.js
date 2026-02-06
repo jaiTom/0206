@@ -83,7 +83,7 @@
     "things you do for me. \n \n" +
     "I made this mini game as a small effort to make this day a little special.  \n" +
     "Just remember that I’m always here for you. I will always be on your side and be your \n" +
-    "shoulder whenever you need me. To more gala, kain, at tambay with you. I love you! \n \n" +
+    "crying shoulder whenever you need. To more gala, kain, at tambay with you. I love you! \n \n" +
     "Love, \nJai";
 
   // ===== PET SETTINGS =====
@@ -1333,3 +1333,4 @@
   resetWorld();   // only once here
   requestAnimationFrame(tick);
 })();
+
